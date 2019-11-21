@@ -2,11 +2,13 @@ CloudFormation do
 
   export = defined?(export_name) ? export_name : component_name
 
-  awsvpc_enabled = false
-  if defined?(network_mode) && network_mode == 'awsvpc'
-    awsvpc_enabled = true
-    Condition('IsFargate', FnEquals(Ref('EnableFargate'), 'true'))
-  end
+  #awsvpc_enabled = false
+  #if defined?(network_mode) && network_mode == 'awsvpc'
+  #  awsvpc_enabled = true
+  #  Condition('IsFargate', FnEquals(Ref('EnableFargate'), 'true'))
+  #end
+  Condition('awsvpcEnaabled', FnEquals(Ref('NetworkMode'), 'awsvpc'))
+  Condition('IsFargate', FnAnd([FnEquals(Ref('NetworkMode'), 'awsvpc'), FnEquals(Ref('EnableFargate'), 'true')]))
 
   tags = []
   tags << { Key: "Name", Value: component_name }
@@ -248,9 +250,10 @@ CloudFormation do
       Memory memory
     end
 
-    if defined?(network_mode)
-      NetworkMode network_mode
-    end
+    #if defined?(network_mode)
+    #  NetworkMode network_mode
+    #end
+    NetworkMode Ref('NetworkMode')
 
     if task_volumes.any?
       Volumes task_volumes
@@ -265,9 +268,10 @@ CloudFormation do
       PlacementConstraints task_constraints 
     end
 
-    if awsvpc_enabled
-        Property('RequiresCompatibilities', FnIf('IsFargate', ['FARGATE'], ['EC2']))
-    end
+    #if awsvpc_enabled
+    #    Property('RequiresCompatibilities', FnIf('IsFargate', ['FARGATE'], ['EC2']))
+    #end
+    Property('RequiresCompatibilities', FnIf('awsvpcEnabled',FnIf('IsFargate', ['FARGATE'], ['EC2']), "AWS::NoValue"))
 
     Tags tags
 
@@ -357,12 +361,11 @@ CloudFormation do
     }
   end
 
-  unless awsvpc_enabled
-    IAM_Role('Role') do
-      AssumeRolePolicyDocument service_role_assume_policy('ecs')
-      Path '/'
-      ManagedPolicyArns ["arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceRole"]
-    end
+  IAM_Role('Role') do
+    Condition 'awsvpcEnabled'
+    AssumeRolePolicyDocument service_role_assume_policy('ecs')
+    Path '/'
+    ManagedPolicyArns ["arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceRole"]
   end
 
   has_security_group = false
@@ -370,16 +373,28 @@ CloudFormation do
     has_security_group = true
   end
 
-  if awsvpc_enabled == true
-    sg_name = 'SecurityGroupBackplane'
-    if has_security_group == true
-      EC2_SecurityGroup('ServiceSecurityGroup') do
-        VpcId Ref('VPCId')
-        GroupDescription "#{component_name} ECS service"
-        SecurityGroupIngress sg_create_rules(securityGroups[component_name], ip_blocks)
-      end
-      sg_name = 'ServiceSecurityGroup'
+  #if awsvpc_enabled == true
+  #  sg_name = 'SecurityGroupBackplane'
+  #  if has_security_group == true
+  #    EC2_SecurityGroup('ServiceSecurityGroup') do
+  #      VpcId Ref('VPCId')
+  #      GroupDescription "#{component_name} ECS service"
+  #      SecurityGroupIngress sg_create_rules(securityGroups[component_name], ip_blocks)
+  #    end
+  #    sg_name = 'ServiceSecurityGroup'
+  #  end
+  #end
+
+
+  sg_name = 'SecurityGroupBackplane'
+  if has_security_group == true
+    EC2_SecurityGroup('ServiceSecurityGroup') do
+      Condition 'awsvpcEnabled'
+      VpcId Ref('VPCId')
+      GroupDescription "#{component_name} ECS service"
+      SecurityGroupIngress sg_create_rules(securityGroups[component_name], ip_blocks)
     end
+    sg_name = 'ServiceSecurityGroup'
   end
 
   registry = {}
@@ -420,9 +435,11 @@ CloudFormation do
   strategy = defined?(scheduling_strategy) ? scheduling_strategy : nil
 
   ECS_Service('Service') do
-    if awsvpc_enabled
-        LaunchType FnIf('IsFargate', 'FARGATE', 'EC2')
-    end
+    #if awsvpc_enabled
+    #    LaunchType FnIf('IsFargate', 'FARGATE', 'EC2')
+    #end
+    LaunchType FnIf('awsvpcEnabled',FnIf('IsFargate', 'FARGATE', 'EC2'),"AWS::NoValue")
+    
     Cluster Ref("EcsCluster")
     Property("HealthCheckGracePeriodSeconds", health_check_grace_period) if defined? health_check_grace_period
     DesiredCount Ref('DesiredCount') if strategy != 'DAEMON'
@@ -434,19 +451,25 @@ CloudFormation do
     SchedulingStrategy scheduling_strategy if !strategy.nil?
 
     if service_loadbalancer.any?
-      Role Ref('Role') unless awsvpc_enabled
+      #Role Ref('Role') unless awsvpc_enabled
+      Role FnIf('awsvpcEnabled', "AWS::NoValue", Ref('Role'))
       LoadBalancers service_loadbalancer
     end
 
-    if awsvpc_enabled == true
-      NetworkConfiguration({
-        AwsvpcConfiguration: {
-          AssignPublicIp: "DISABLED",
-          SecurityGroups: [ Ref(sg_name) ],
-          Subnets: Ref('SubnetIds')
-        }
-      })
-    end
+    #if awsvpc_enabled == true
+    #  NetworkConfiguration({
+    #    AwsvpcConfiguration: {
+    #      AssignPublicIp: "DISABLED",
+    #      SecurityGroups: [ Ref(sg_name) ],
+    #      Subnets: Ref('SubnetIds')
+    #    }
+    #  })
+    #end
+
+
+    NetworkConfiguration(
+      FnIf('awsvpcEnabled', { AwsvpcConfiguration: { AssignPublicIp: "DISABLED", SecurityGroups: [ Ref(sg_name) ], Subnets: Ref('SubnetIds')}}, "AWS::NoValue")
+    )
 
     unless registry.empty?
       ServiceRegistries([registry])

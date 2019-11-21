@@ -9,9 +9,10 @@ CfhighlanderTemplate do
     ComponentParam 'EnvironmentType', 'development', allowedValues: ['development','production'], isGlobal: true
     ComponentParam 'EcsCluster'
 
-    if (defined? targetgroup) || ((defined? network_mode) && (network_mode == "awsvpc"))
-      ComponentParam 'VPCId', type: 'AWS::EC2::VPC::Id'
-    end
+    #if (defined? targetgroup) || ((defined? network_mode) && (network_mode == "awsvpc"))
+    #  ComponentParam 'VPCId', type: 'AWS::EC2::VPC::Id'
+    #end
+    ComponentParam 'VPCId', ""
 
     if defined? targetgroup
       ComponentParam 'LoadBalancer'
@@ -26,11 +27,16 @@ CfhighlanderTemplate do
 
     ComponentParam 'EnableScaling', 'false', allowedValues: ['true','false']
 
-    if ((defined? network_mode) && (network_mode == "awsvpc"))
-      ComponentParam 'SubnetIds', type: 'CommaDelimitedList'
-      ComponentParam 'SecurityGroupBackplane'
-      ComponentParam 'EnableFargate', 'false'
-    end
+    #if ((defined? network_mode) && (network_mode == "awsvpc"))
+    #  ComponentParam 'SubnetIds', type: 'CommaDelimitedList'
+    #  ComponentParam 'SecurityGroupBackplane'
+    #  ComponentParam 'EnableFargate', 'false'
+    #end
+
+    ComponentParam 'NetworkMode', 'bridge'
+    ComponentParam 'SubnetIds', type: 'CommaDelimitedList'
+    ComponentParam 'SecurityGroupBackplane', ""
+    ComponentParam 'EnableFargate', 'false'
 
     task_definition.each do |task_def, task|
       if task.has_key?('tag_param')
